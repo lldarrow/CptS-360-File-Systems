@@ -1,0 +1,417 @@
+/*
+Luke Darrow
+11349190
+CptS 360 Lab 6
+*/
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <math.h>
+#include <sys/stat.h>
+#include <string.h>
+#include <fcntl.h>
+#include <ext2fs/ext2_fs.h>
+
+typedef unsigned int   u32;
+
+//define shorter TYPES, save typing efforts
+typedef struct ext2_group_desc  GD;
+typedef struct ext2_super_block SUPER;
+typedef struct ext2_inode       INODE;
+typedef struct ext2_dir_entry_2 DIR;//need this for new version of e2fs
+
+GD    *gp;
+SUPER *sp;
+INODE *ip;
+DIR   *dp; 
+
+#define BLKSIZE 1024
+
+char buf[BLKSIZE];
+char big_buf[BLKSIZE * 4];
+char print_buf[BLKSIZE * 4];
+//buffers for indirections
+unsigned int buf1[1024];
+unsigned int buf2[1024];
+int long fd;
+int long long imap, bmap;
+int long ninodes, nblocks, nfreeInodes, nfreeBlocks;
+//beginning of block
+int long inodeBeginBlock;
+int long disp, gdblk, gdisp, blk;
+char *device;
+char *cp;
+
+//step 0
+void get_block(int fd, int blk, char buf[BLKSIZE])
+{
+	lseek(fd, (long)(blk*BLKSIZE), 0);
+	read(fd, buf, BLKSIZE);
+}
+
+void get_big_block(int long fd, int long blk, char buf[4096])
+{
+	lseek64(fd, (long)(blk*4095), 0);
+	read(fd, buf, 4096);
+}
+
+//taken from prelab
+super()
+{
+  
+  // read SUPER block
+  get_block(fd, 1, buf);  
+  sp = (SUPER *)buf;
+
+  // check for EXT2 magic number:
+  if (sp->s_magic != 0xEF53){
+    printf("NOT an EXT2 FS\n");
+    exit(1);
+  }
+
+  printf("************  super block info: *************\n");
+  //total number of inodes
+  printf("inode_count\t\t\t%d\n", sp->s_inodes_count);
+  //total number of blocks
+  printf("blocks_count\t\t\t%d\n", sp->s_blocks_count);
+  //number of reserved blocks
+  printf("r_blocks_count\t\t\t%d\n", sp->s_r_blocks_count);
+
+  printf("free_blocks_count\t\t%d\n", sp->s_free_blocks_count);
+  printf("free_inodes_count\t\t%d\n", sp->s_free_inodes_count);
+  //log_block_size will be 0 for 1KB block, 2 for 4KB block
+  printf("log_block_size\t\t\t%d\n", sp->s_log_block_size);
+  
+  //first_data_block is 1 for FD and 0 for HD
+  printf("first_data_block\t\t%d\n", sp->s_first_data_block);
+  printf("magic number = %x\n", sp->s_magic);
+
+  printf("rev_level\t\t\t%d\n", sp->s_rev_level);
+  printf("inode_size\t\t\t%d\n", sp->s_inode_size);
+  //this super only prints the description of the first block, 0
+  printf("block_group_nr\t\t\t0\n");
+  if(sp->s_first_data_block == 1)
+    printf("blksize\t\t\t\t%d\n", BLKSIZE);
+  else
+    printf("blksize\t\t\t\t%d\n", BLKSIZE * 4);
+  printf("inode_per_group\t\t\t%d\n", sp->s_inodes_per_group);
+
+  printf("---------------------------------------------\n");
+  //inode size/4
+  if(sp->s_first_data_block == 1)
+    printf("desc_per_block\t\t\t%d\n", sp->s_inode_size/4);
+  else
+    printf("desc_per_block\t\t\t%d\n", sp->s_inode_size/2);
+  // blksize/inode_size
+  if(sp->s_first_data_block == 1)
+    printf("inodes_per_block\t\t%d\n", BLKSIZE/sp->s_inode_size);
+  else
+    printf("inodes_per_block\t\t%d\n", 4096/sp->s_inode_size);
+  if(sp->s_inode_size == 256)
+    printf("inode_size_ratio\t\t%d\n", 2);
+  else
+    printf("inode_size_ratio\t\t%d\n", sp->s_inode_size);
+}
+
+int long big_search(INODE *inodePtr, char *name)
+{
+	//search for name in the data blocks of this INODE
+	//if found, return name's ino;
+	//return 0
+	//task 5
+	
+	//read a block into buffer
+
+	char search_buf[4096];
+	char compare[1024];
+	int i = 0;
+	
+	lseek64(fd, (long)(ip->i_block[0] * 4096), 0);
+	read(fd, search_buf, 4*BLKSIZE);
+
+	dp = (DIR *)search_buf;//access buf[] as DIR entries
+	cp = search_buf;//char pointer pointing at buf[ ]
+
+	printf("    i_number rec_len name_len\tname\n");
+	//this prints some weird symbols on some names but is otherwise correct
+	while(cp < search_buf + 4096)
+	{
+		dp->name[dp->name_len] = '\0';
+		printf("%8d %8d %7d      %s\n", dp->inode, dp->rec_len, dp->name_len, dp->name);
+		if(strcmp(name, dp->name) == 0)
+		{
+			printf("found %s : inode = %d\n", name, dp->inode);
+			return dp->inode;
+		}
+		cp += dp->rec_len;// advance cp by rlen in bytes
+		dp = (DIR *)cp;// pull dp to the next DIR entry
+	}
+
+	printf("name %s does not exist\n", name);
+	return 0;
+}
+
+//main function, execution of the program starts here
+int main(int argc, char *argv[])
+{
+	int long i, j, n, ino;
+	int long inumber, offset, group;
+	int long blocks;
+
+	//the unbroken path
+	char path[2048];
+	char *temp;	
+	//two dimensional character array holds broken up path
+	char name[1024][1024];
+	
+	//check if enough arguments
+	if(argc > 2)
+	{
+		device = argv[1];
+		strcpy(path, argv[2]);
+	}
+	else
+	{
+		printf("not enough arguments\n");
+		exit(0);
+	}
+	
+	//task 4
+	//parse the path
+	i = 0;
+	n = 0;
+	strcat(path, "/");
+	temp = strtok(path, "/");
+	while(temp != NULL)
+	{
+		strcpy(name[i], temp);
+		temp = strtok(NULL, "/");
+		i++;
+		n++;
+	}
+
+	//print the parsed path along with n
+	printf("n = %d", n);
+
+	for(i = 0; i < n; i++)
+		printf("  %s  ", name[i]);
+
+	printf("\n");
+
+	//open the device and set file descriptor
+	fd = open(device, O_RDONLY);
+	if(fd < 0)
+	{
+		//device didn't open properly
+		printf("open %s failed\n", device);
+		exit(1);
+	}
+
+	//task 1
+	//read in Superblock and print some of its important fields
+	super();
+
+	//task 2
+	//read in the group descriptor block (block #2)
+	//still 1 for HD but would be 2 for FD since 1+first_block is the number
+
+	//use lseek since number is HUGE
+	lseek64(fd, (long)(4096), 0);
+	read(fd, big_buf, 4*BLKSIZE);
+	gp = (GD*)big_buf;
+	//determine where INODEs begin on the disk
+	inodeBeginBlock = gp->bg_inode_table;
+
+	
+	//chapter 3, page 74, 3.4.5
+	//apply mail man's twice
+
+	//block size divided by integer size
+	//4k/4 is 1024 not 256 anymore
+	//inode size is 256 on HD, bigger than FD
+
+	printf("************  group 0 info ******************\n");
+	printf("Blocks bitmap block\t\t%d\n", gp->bg_block_bitmap);
+	printf("Inodes bitmap block\t\t%d\n", gp->bg_inode_bitmap);
+	printf("Inodes table block\t\t%d\n", gp->bg_inode_table);
+	printf("Free blocks count\t\t%d\n", gp->bg_free_blocks_count);
+	printf("Free inodes count\t\t%d\n", gp->bg_free_inodes_count);
+	printf("Directories count\t\t%d\n", gp->bg_used_dirs_count);
+	printf("inodes_start\t\t\t%d\n", inodeBeginBlock);
+
+	printf("***********  root inode info ***************\n");
+	//get_block(fd, inodeBeginBlock, buf);
+	lseek64(fd, (long)(inodeBeginBlock * 4096), 0);
+	read(fd, big_buf, 4*BLKSIZE);
+
+	ip = (INODE *)big_buf + 2;
+	
+	printf("File mode\t\t\t%4x\n", ip->i_mode);
+	printf("Size in bytes\t\t\t%d\n", ip->i_size);
+	printf("Blocks count\t\t\t%d\n", ip->i_blocks);
+	printf("hit a key to continue: ");
+	getchar();
+	printf("block[0] = %d\n", ip->i_block[0]);
+
+	printf("********* root dir entries ***********\n");
+	printf("block = %d\n", ip->i_block[0]);
+	
+	
+	//print information
+	//get_block(fd, ip->i_block[0], buf);
+	lseek64(fd, (long)(ip->i_block[0] * 4096), 0);
+	read(fd, print_buf, 4*BLKSIZE);
+
+	dp = (DIR *)print_buf;//access buf[] as DIR entries
+	cp = print_buf;//char pointer pointing at buf[ ]
+
+	printf("    i_number rec_len name_len\tname\n");
+	//this prints some weird symbols on some names but is otherwise correct
+	while(cp < print_buf + 4096)
+	{
+		dp->name[dp->name_len] = '\0';
+		printf("%8d %8d %7d      %s\n", dp->inode, dp->rec_len, dp->name_len, dp->name);
+		cp += dp->rec_len;// advance cp by rlen in bytes
+		dp = (DIR *)cp;// pull dp to the next DIR entry
+	}
+	
+	printf("hit a key to continue: ");
+	getchar();
+
+	printf("mode=%4x uid=%d gid=%d\n", ip->i_mode, ip->i_uid, ip->i_uid);
+	for(i = 0; i < n; i++)
+	{
+		printf("===========================================\n");
+		printf("i=%d name[%d]=%s\n", i, i, name[i]);
+		printf("search for %s\n", name[i]);
+		printf("i=%d i_block[0]=%d\n", i, ip->i_block[i]);
+
+		ino = big_search(ip, name[i]);
+
+		if(ino == 0)
+		{
+			//can't find name[i], bomb out!
+			return 0;
+		}
+		else
+		{
+			//
+			//THIS ELSE STATEMENT IS WHERE I NEED HELP!
+			//
+			
+			group = (ino - 1) / sp->s_inodes_per_group;
+			inumber = (ino - 1) % sp->s_inodes_per_group;
+
+			//what is desc per block?
+			//gdblk = group / sp->s_desc_per_block;
+			//gdisp = group % sp->s_desc_per_block;
+
+			blk = inumber / 256;
+			disp = inumber / (sp->s_log_block_size / 256.0);
+
+			printf("group=%d inumber=%d\n", ip->i_gid, inumber);
+			printf("disp = %d\n", disp);
+			printf("group %d inodes_start = %d\n", ip->i_gid, inodeBeginBlock);
+			printf("blk=%d disp=%d\n", ((ino - 1)/8 + inodeBeginBlock), inumber);
+			
+			if(S_ISREG(ip->i_mode) && i < n-1)
+			{
+				printf("ERROR: Not Valid Directory\n");
+				return 1;
+			}
+
+			//BASED OF NOTES FROM BOOK
+			get_big_blk(1 + sp->s_first_data_block + gdblk, big_buf, 1);// GD begin block
+			gp = (GD *)big_buf + gdisp;
+			blk += gp->bg_inode_table;
+			get_big_blk(blk, big_buf, 1);
+			
+			
+			ip = (INODE *)big_buf + inumber;
+			getchar();
+		}
+	}
+
+	blocks = ceil(ip->i_size/4096.0);
+	printf("\n\nsize=%d  blocks=%d\n", ip->i_size, blocks);
+	printf("****************  DISK BLOCKS  *******************\n");
+
+	//fields i_block[0] through i_block[14] hold the disk blocks
+	//i_block[0] through i_block[11] point to direct blocks
+	//i_block[12] points to a block which contains 256 block numbers
+	//i_block[13] points to a block which points to 256 blocks
+	//i_block[14] is triple indirect
+	for(i = 0; i < 15; i++)
+	{
+		if(ip->i_block[i] != 0)
+		{
+			printf("block[%d] = %d\n", i, ip->i_block[i]);
+		}
+	}
+
+	printf("\n================ Direct Blocks ===================\n");
+	for(i = 0; i < 12; i++)
+	{
+		if(ip->i_block[i] != 0)
+		{
+			printf("%d ", ip->i_block[i]);
+			blocks--;
+		}
+		if(i == 9)
+			putchar('\n');
+	}
+
+	if(ip->i_block[12])
+	{
+		printf("\nblocks remain = %d\n", blocks);
+		printf("===============  Indirect blocks   ===============\n");
+		
+		//danger zone
+
+		get_block(fd, ip->i_block[12], (char*)buf1);
+		
+		for(i = 0; i < 1024; i++)
+		{
+			if(buf1[i])
+			{
+				if(i % 10 == 0 && i != 0)
+					putchar('\n');
+				printf("%d ", buf1[i]);
+				blocks--;
+			}
+		}
+		
+		printf("\n");
+
+		//if blocks remaining, do double indirect
+		if(ip->i_block[13])
+		{
+			printf("\nblocks remain = %d\n", blocks);
+			printf("===========  Double Indirect blocks   ============\n");
+			get_block(fd, ip->i_block[13], (char*)buf1);
+	        for(i = 0; i < 1024; i++)
+    	    {
+    	        if(buf1[i])
+    	        {
+    	            get_block(fd, buf1[i], (char*)buf2);
+    	            for(j = 0; j < 1024; j++)
+    	            {
+    	                if(buf2[j])
+    	                {
+    	                    if((j != 0) && (j%10 == 0))
+    	                    {
+    	                        printf("\n");
+    	                    }
+    	                    printf("%d ", buf2[j]);
+							blocks--;
+    	                }
+    	            }
+    	        }
+    	    }
+			printf("\nblocks remain = %d\n", blocks);
+		}
+	}
+	printf("\n");
+
+	return 0;
+}

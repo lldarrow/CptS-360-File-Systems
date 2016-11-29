@@ -1,0 +1,3 @@
+put name (<60 char) into inode of new block
+change link type, and file size is length of string you put in there
+

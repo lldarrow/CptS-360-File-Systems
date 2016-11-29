@@ -1,0 +1,4 @@
+this is a test
+just a test file
+cmd = echo args[1] = "abababababab"
+"abababababab"

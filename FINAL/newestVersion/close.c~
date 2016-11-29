@@ -1,0 +1,69 @@
+/*****************************************
+CptS 360 Final Project
+
+close
+
+Programmers:
+David Hoekman 11423672
+Luke Darrow 11349190
+
+Last Modified: 12/8/15
+*****************************************/
+
+//closes a file
+//takes in file descriptor
+void close_file(int fd)
+{
+	int i;
+	OFT *fp;
+
+	if(fd < 0 || fd >= NFD)
+	{
+		printf("ERROR: fd out of range\n");
+		return;
+	}
+
+	//check if fd on the open file table
+	for(i = 0; i < NOFT; i++)
+	{
+		fp = &OpenFileTable[i];
+
+		if(fp->inodeptr == running->fd[fd]->inodeptr)
+			break;
+
+		if(i == NOFT - 1)
+		{
+			printf("ERROR: File not in OpenFileTable\n");
+			return;
+		}
+	}
+
+	//sets fp to the correct fd from the running process
+	fp = running->fd[fd];
+	running->fd[fd] = NULL;
+	//decrement the refCount
+	fp->refCount--;
+
+	if(fp->refCount == 0)//if refCount == 0, write back
+		iput(fp->inodeptr);
+
+	return;
+}
+
+void my_close(char *path)
+{
+	int fd;
+
+	//check for missing path
+	if(!path)
+	{
+		printf("ERROR: missing path\n");
+		return;
+	}
+	
+	//convert fd to int
+	fd = atoi(path);
+	//pass in fd into close
+	close_file(fd);
+	return;
+}

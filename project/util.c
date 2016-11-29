@@ -1,0 +1,389 @@
+/*****************************************
+CptS 360 Final Project
+
+Utility Functions
+
+Programmers:
+David Hoekman 11423672
+Luke Darrow 11349190
+
+Last Modified: 11/23/15
+*****************************************/
+
+#include "type.h"
+#include <libgen.h>
+
+MINODE *minode[100] = {NULL} ;
+MINODE *root;
+PROC   *P1 = NULL, *running = NULL;
+PROC *P[2] = {NULL};
+MOUNT  mounttab[5];
+char dir_name[64] = "", base_name[64] = ""; 
+
+char names[64][128],*name[64];
+int fd, dev, n;
+int nblocks, ninodes, bmap, imap, inode_start, iblock;
+int inodeBeginBlock;
+char pathname[256], parameter[256];
+int DEBUG;
+
+//get_block() takes in file descriptor, block and buf
+//reads a block into buffer
+void get_block(int fd, int blk, char buf[BLKSIZE])
+{
+	lseek(fd, (long)(blk*BLKSIZE), 0);
+	read(fd, buf, BLKSIZE);
+}
+
+//put_block() takes in file descriptor, block and buf
+//writes a block back
+void put_block(int fd, int blk, char buf[BLKSIZE])
+{
+	lseek(fd, (long)(blk*BLKSIZE), 0);
+	write(fd, buf, BLKSIZE);
+}
+
+void tokenize(char pathname[256])
+{
+	char temp[256];
+	strcpy(temp, pathname);
+
+	//use libgen functions to get dirname and basenaem
+	strcpy(dir_name, dirname(pathname));
+	strcpy(base_name, basename(temp));
+}
+
+//returns inode address based off given pathname
+int getino(int *dev, char pathname[64])
+{
+	int ino = 0, i = 0, n = 0;
+	int inumber, offset;
+	char path[64];
+	char name[64][64];
+	char *temp;
+	char buf[1024];
+
+	//set minode pointer to current working directory of running process
+	MINODE *mip;
+	mip = running->cwd;
+
+	//check if starts at root
+	if(pathname[0] == '/')
+	{
+		mip = root;
+	}
+
+	//if there's a pathname, then parse it
+	if(!strcmp(pathname, "."))
+	{
+			ino = search(mip, ".");
+
+			if(ino == 0)
+			{
+				//can't find name[i]
+				return 0;
+			}
+
+			offset = (ino - 1) % 8;
+			get_block(dev, ((ino - 1) / 8) + inodeBeginBlock, buf);
+			mip = (MINODE*)buf + offset;
+
+		return ino;
+	}
+	else if(pathname)
+	{
+		//parse the string and put it into name
+		strcat(pathname, "/");
+		temp = strtok(pathname, "/");
+
+		while(temp != NULL)
+		{
+			strcpy(name[i], temp);
+			temp = strtok(NULL, "/");
+			i++;
+			n++;
+		}
+		//parsing complete
+	}
+
+	//time to do the searching
+	for(i = 0; i < n; i++)
+	{
+		printf("now searching for %s\n", name[i]);
+		ino = search(mip, name[i]);
+
+		if(ino == 0)
+		{
+			//can't find name[i]
+			return 0;
+		}
+
+		printf("found %s at inode %d\n", name[i], ino);
+
+		offset = (ino - 1) % 8;
+		get_block(dev, ((ino - 1) / 8) + inodeBeginBlock, buf);
+		mip = (MINODE*)buf + offset;
+	}
+
+	return ino;
+}
+
+//loads inode into slot in minode[] array
+//currently this returns an MINODE from block
+MINODE *iget(int dev, int ino)
+{
+	int i = 0;
+	int ipos = 0;
+	int offset = 0;
+	char buf[1024];
+	MINODE *mip = malloc(sizeof(MINODE));
+
+	//This for loop checks if this minode is already in use, and increments its refcount if so
+	//Also returns that minode for use
+	for (i = 0; i < 100; i++)
+	{
+		mip = minode[i];
+		if(mip->refCount)
+		{
+			if (mip->dev==dev && mip->ino==ino)
+			{
+				mip->refCount++;
+				printf("minode[%d]->refCount incremented\n", i);
+				return mip;
+			}
+		}
+	}
+	//If we don't have this inode yet we gotta make our own.
+
+	//mailman's
+	ipos = (ino - 1)/8 + INODE_START_POS;
+	offset = (ino - 1) % 8;
+
+	//get the block
+	get_block(dev, ipos, buf);
+	//load inode
+	ip = (INODE *)buf + offset;
+
+	for(i = 0; i < 100; i++)
+		{
+			printf("minode[%d]->refCount = %d\n", i, minode[i]->refCount);
+			if(minode[i]->refCount == 0)
+			{
+				printf("using minode[%d]\n", i);
+				mip = minode[i];
+				minode[i]->refCount++;
+				break;
+			}
+		}
+
+	//if it's a directory, set the minode->INODE to the inode
+	if(S_ISDIR(ip->i_mode))
+	{
+		mip->INODE = *ip;
+		mip->dev = dev;
+		mip->ino = ino;
+		strcpy(mip->name, pathname);
+		return mip;
+	}
+	else
+	{
+		printf("a file is not a directory\n");
+		minode[i]->refCount--;
+		return NULL;
+	}
+}
+
+//releases a minode[]
+void iput(MINODE *mip)
+{
+	int ino = 0;
+	int offset, ipos;
+	char buf[1024];
+
+	ino = getino(mip, ".");
+	//decrement refCount by 1
+	mip->refCount--;
+
+	//check refcount to see if anyone using it
+	//check dirty to see if it's been changed, dirty == 1 if changed
+	//if refCount > 0 or dirty return
+	if (!mip->refCount || !mip->dirty)
+		return;
+
+	//mail man's to determine disk block and which inode in that block
+	ipos = (ino - 1) / 8 + INODE_START_POS;
+	offset = (ino -1) % 8;
+
+	//read that block in
+	get_block(dev, ipos, buf);
+
+	//copy minode's inode into the inode area in that block
+	ip = (INODE*)buf + offset;
+	*ip = mip->INODE;
+
+	//write block back to disk
+	put_block(dev, ipos, buf);
+}
+
+//Search() takes in an minode and searches its data blocks for a name
+//if found, returns name's ino
+//returns 0 on failure
+int search(MINODE *mip, char *name)
+{
+	//search for name in the data blocks of this INODE
+	//if found, return name's ino;
+	//return 0
+
+	int i;
+	char buf[BLKSIZE], *cp;
+
+	//search through the direct blocks
+	for(i = 0; i < 12; i++)
+	{
+		//if the data block has stuff in it
+		if(mip->INODE.i_block[i])
+		{
+			//get the block
+			get_block(dev, mip->INODE.i_block[i], buf);
+
+			dp = (DIR *)buf;
+			cp = buf;
+
+			while(cp < buf + BLKSIZE)
+			{
+				//null terminate dp->name for strcmp
+				dp->name[dp->name_len] = '\0';
+				//check if it's the name we're looking for
+				if(strcmp(name, dp->name) == 0)
+					return dp->inode;//name matches, return the inode
+				cp += dp->rec_len;
+				dp = (DIR *)cp;
+			}
+		}
+	}
+	//name does not exist, print error message
+	printf("name %s does not exist\n", name);
+	return 0;
+}
+
+//loads inode into slot in minode[] array
+//currently this returns an MINODE from block
+MINODE *iget(int dev, int ino)
+{
+	int i = 0;
+	int ipos = 0;
+	int offset = 0;
+	char buf[1024];
+	MINODE *mip = malloc(sizeof(MINODE));
+
+	//This for loop checks if this minode is already in use, and increments its refcount if so
+	//Also returns that minode for use
+	for (i = 0; i < 100; i++)
+	{
+		mip = minode[i];
+		if(mip->refCount)
+		{
+			if (mip->dev==dev && mip->ino==ino)
+			{
+				mip->refCount++;
+				printf("minode[%d]->refCount incremented\n", i);
+				return mip;
+			}
+		}
+	}
+	//If we don't have this inode yet we gotta make our own.
+
+	//mailman's
+	ipos = (ino - 1)/8 + INODE_START_POS;
+	offset = (ino - 1) % 8;
+
+	//get the block
+	get_block(dev, ipos, buf);
+	//load inode
+	ip = (INODE *)buf + offset;
+
+	for(i = 0; i < 100; i++)
+		{
+			printf("minode[%d]->refCount = %d\n", i, minode[i]->refCount);
+			if(minode[i]->refCount == 0)
+			{
+				printf("using minode[%d]\n", i);
+				mip = minode[i];
+				minode[i]->refCount++;
+				break;
+			}
+		}
+
+	//if it's a directory, set the minode->INODE to the inode
+	if(S_ISDIR(ip->i_mode))
+	{
+		mip->INODE = *ip;
+		mip->dev = dev;
+		mip->ino = ino;
+		strcpy(mip->name, pathname);
+		return mip;
+	}
+	else
+	{
+		printf("a file is not a directory\n");
+		minode[i]->refCount--;
+		return NULL;
+	}
+}
+
+//releases a minode[]
+void iput(MINODE *mip)
+{
+	int ino = 0;
+	int offset, ipos;
+	char buf[1024];
+
+	ino = getino(mip, ".");
+	//decrement refCount by 1
+	mip->refCount--;
+
+	//check refcount to see if anyone using it
+	//check dirty to see if it's been changed, dirty == 1 if changed
+	//if refCount > 0 or dirty return
+	if (!mip->refCount || !mip->dirty)
+		return;
+
+	//mail man's to determine disk block and which inode in that block
+	ipos = (ino - 1) / 8 + INODE_START_POS;
+	offset = (ino -1) % 8;
+
+	//read that block in
+	get_block(dev, ipos, buf);
+
+	//copy minode's inode into the inode area in that block
+	ip = (INODE*)buf + offset;
+	*ip = mip->INODE;
+
+	//write block back to disk
+	put_block(dev, ipos, buf);
+}
+
+int findmyname(MINODE *parent, int myino, char *myname)
+{
+	/*
+	Given the parent DIR (MINODE pointer) and myino, this function finds 
+	the name string of myino in the parent's data block. This is the SAME
+	as SEARCH() by myino, then copy its name string into myname[ ].
+	*/
+}
+
+int findino(MINODE *mip, int *myino, *parentino)
+{
+	/*
+	For a DIR Minode, extract the inumbers of . and .. 
+	Read in 0th data block. The inumbers are in the first two dir entries.
+	*/
+}
+
+int main()
+{
+char word[256] = "a/b/c/d";
+tokenize(word);
+printf("%s\n%s\n", dir_name, base_name);
+return 0;
+}

@@ -1,0 +1,147 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+
+typedef unsigned int u32;
+char *table = "0123456789ABCDEF";
+char *cp;
+int *FP, *ip;
+
+void prints(char *s)
+{
+    int i;
+    //writes each character until null character in string is reached
+    for (i = 0;s[i] != '\0'; i++)
+    {
+        putchar(s[i]);
+    }
+}
+
+int rpu(u32 x, int base)
+{
+    char c;
+    if (x){
+        c = table[x % base];
+        rpu(x / base, base);
+        putchar(c);
+    }
+    return 0;
+}
+
+//prints an unsigned int (u32)x, as written in the lab
+int printu(u32 x, int base)
+{
+    if (x == 0)
+        putchar('0');
+    else
+        rpu(x, base);
+    putchar(' ');
+}
+
+//prints an integer (which may be negative)
+int printd(int x)
+{
+    //if x is negative print the sign and convert to unsigned
+    if(x < 0)
+    {
+        prints("-");
+        x = x * -1;
+    }
+    printu(x, 10);
+    return 0;
+}
+
+//print x in octal as 0.....
+int printo(u32 x)
+{
+    prints("0");
+    printu(x, 8);
+    return 0;
+}
+
+//print x in hex. as 0x....
+int printx(u32 x)
+{
+    prints("0x");
+    printu(x, 16);
+    return 0;
+}
+
+void myprintf(char *fmt, ...)
+{
+    //set ip to first item to be printed on stack, which is to the left of fmt
+    ip = (int*)&fmt + 1;
+    //point cp to the format string
+    cp = fmt;
+    
+    //iterate through the format string
+    while(*cp)
+    {
+        //if the symbol matches '%' it skips this and goes to the switch after incrementing cp
+        if(*cp != '%')
+        {
+            putchar(*cp);
+            if(*cp == '\n')
+                putchar('\r');
+            cp++;
+            //go to next iteration of while loop
+            continue;
+        }
+        cp++;
+        switch(*cp)
+        {
+            case 'c':
+                putchar(*ip);
+                break;
+            case 's':
+                prints(*ip);
+                break;
+            case 'u':
+                printu(*ip, 10);
+                break;
+            case 'd':
+                printd(*ip);
+                break;
+            case 'o':
+                printo(*ip);
+                break;
+            case 'x':
+                printx(*ip);
+                break;
+        }
+        cp++;
+        ip++;
+    }
+}
+
+void mymain(int argc, char *argv[], char *env[])
+{
+    int i;
+    char** envp;
+    char* this Env;
+
+    myprintf("in mymain(): argc=%d\n", argc);
+    
+    //argc is the argument count
+    for(i=0; i < argc; i++)
+        myprintf("argv[%d] = %s\n", i, argv[i]);
+
+    //write code to print the env strings
+    
+    //set i to 0 to iterate through this
+    i = 0;
+    //print the environment list
+    for(envp = env; *envp != 0; envp++)
+    {
+        thisEnv = *envp;
+        printf("env[%d] = ", i);
+        printf("%s\n", thisEnv);
+        i++;
+    }
+    
+    myprintf("---------- testing YOUR myprintf() ---------\n");
+    myprintf("this is a test\n");
+    myprintf("testing a=%d b=%x c=%c s=%s\n", 123, 123, 'a', "testing");
+    myprintf("string=%s, a=%d  b=%u  c=%o  d=%x\n", "testing string", -1024, 1024, 1024, 1024);
+    myprintf("mymain() return to main() in assembly\n");
+}

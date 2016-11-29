@@ -1,0 +1,124 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <sys/cdefs.h>
+
+typedef unsigned int u32;
+char *table = "0123456789ABCDEF";
+char *cp;
+int *FP, *ip;
+
+void prints(char *s)
+{
+    int i;
+    //writes each character until null character in string is reached
+    for (i = 0;s[i] != '\0'; i++)
+    {
+        putchar(s[i]);
+    }
+}
+
+int rpu(u32 x, int base)
+{
+    char c;
+    if (x){
+        c = table[x % base];
+        rpu(x / base, base);
+        putchar(c);
+    }
+    return 0;
+}
+
+//prints an unsigned int (u32)x, as written in the lab
+int printu(u32 x, int base)
+{
+    if (x == 0)
+        putchar('0');
+    else
+        rpu(x, base);
+    putchar(' ');
+}
+
+//prints an integer (which may be negative)
+int printd(int x)
+{
+    //if x is negative print the sign and convert to unsigned
+    if(x < 0)
+    {
+        prints("-");
+        x = x * -1;
+    }
+    printu(x, 10);
+    return 0;
+}
+
+//print x in octal as 0.....
+int printo(u32 x)
+{
+    prints("0");
+    printu(x, 8);
+    return 0;
+}
+
+//print x in hex. as 0x....
+int printx(u32 x)
+{
+    prints("0x");
+    printu(x, 16);
+    return 0;
+}
+
+void myprintf(char *fmt, ...)
+{
+    asm("movl %ebp, ip");
+    ip += 12;
+
+    //beginning of forloop sets cp to point at format string
+    for(cp = fmt; *cp != '\0'; cp++)
+    {
+        //"spits out" any char that's not %
+        if(*cp != '%')
+        {
+            putchar(*cp);
+            if(*cp == '\n')
+                putchar('\r');
+            continue;
+        }
+        switch(*cp)
+        {
+            case 'c':
+                    putchar((char)*ip);
+                    break;
+            case 's':
+                    prints((char*)*ip);
+                    break;
+            case 'u':
+                    printu(*ip, 10);
+                    break;
+            case 'd':
+                    printd(*ip);
+                    break;
+            case 'o':
+                    printo(*ip);
+                    break;
+            case 'x':
+                    printx(*ip);
+                    break;
+        }
+    }
+}
+
+int main()
+{
+    u32 x = 42;
+    printd(24);
+    prints("\n");
+    printo(24);
+    prints("\n");
+    printx(24);
+    prints("\n");
+    myprintf("Hello %d\n", 52);
+    return 0;
+}
+
+

@@ -1,0 +1,45 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <ext2fs/ext2_fs.h>
+
+#define BLKSIZE 1024
+
+int dir(INODE inode)
+{
+	char buf[1024];
+	char *cp = &buf;
+	DIR *dp; = &buf;
+
+	int i;
+
+	for(i = 0; i < (inode.i_size / block); i++)
+	{
+		u8* block = get_block(dev, inode.i_block[i]);
+		u8* cp = block;
+		DIR* dp = (DIR*)block;
+
+		printf("i_block[%d]\n", i);
+		printf("name\n");
+
+		while(cp < (block + block_size))
+		{
+			printf("%s\n", dp->name);
+			cp += dp->rec_len;
+			cp = (DIR*)cp;
+		}
+		putchar('\n");
+
+		free(block);
+	}
+}
+
+main(int argc, char *argv[])
+{
+	if(argc == 2)
+	{
+		dir(argv[1]);
+	}
+	else
+		exit(1);
+}

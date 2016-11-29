@@ -1,0 +1,185 @@
+/*
+Luke Darrow 11349190
+CptS 360 Lab 3
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <sys/types.h>
+//unistd has chdir() among other functions used
+#include <unistd.h>
+#include <fcntl.h>
+
+//home directory
+char *home;
+//command path
+char *path[15];
+
+//returns a flag if the command was done or not.
+//1 indicates a command was done, 0 indicates no command executed
+//does the simple commands cd and exit
+int simpleCommand(char *cmd, char *arg)
+{
+    //flags
+    int done = 0;
+
+    //check if cmd is cd
+    if(strcmp(cmd, "cd") == 0)
+    {
+        //if no arguments, change dir to home
+        if(arg == NULL)
+        {
+            if(home)
+            {
+                chdir(home);
+            }
+        }
+        else
+        {
+            //change the directory to the argument or print error if chdir can't find it
+            if(chdir(arg) < 0)
+                printf("ERROR: could not find directory\n");
+        }
+
+        done = 1;
+        return done;
+    }
+    else if(strcmp(cmd, "exit") == 0)
+    {
+        //exit
+        done = 1;
+        exit(1);
+        return done;
+    }
+    
+    //return flag indicating whether a command was done or not
+    return done;
+}
+
+//processes a single command
+int doCommand(char command[512], char* envp)
+{
+    char *args[512], *cmd, *arg;
+    char old[128], new[1024];
+    int pid, ppid, status, redirect = 0, redirect_loc = 0, i = 1, built_in = 0;
+
+    //get the command, aka the first value in the string
+    cmd = strtok(command, " ");
+    
+    //arguments from where strtok left off after the " "
+    arg = strtok(NULL, " ");
+
+    //set first item to the cmd
+    args[0] = cmd;
+    //while arg is not empty
+    while(arg != NULL)
+    {
+        args[i] = arg;
+        //redirects. set redirect to value based on symbol for later
+        if(strcmp(arg, "<") == 0)
+        {
+            //cmd arg1 arg2 ... < infile
+            //take inputs from infile
+            redirect_loc = i;
+            redirect = 1;
+        }
+        else if(strcmp(arg, ">") == 0)
+        {
+            //cmd arg1 arg2 ... > outfile
+            //send outputs to outfile
+            redirect_loc = i;
+            redirect = 2;
+        }
+        else if(strcmp(arg, ">>") == 0)
+        {
+            //cmd arg1 arg2 ... >> outfile
+            //append outputs to outfile
+            redirect_loc = i;
+            redirect = 3;
+        }
+        //go on to next argument
+        arg = strtok(NULL, " ");
+        i++;
+    }
+    
+    //set redirect symbol to null
+    if(!redirect_loc)
+        args[i] = NULL;
+    else
+        args[redirect_loc] = NULL;
+    
+    //parent process
+    //redirect = 1 means infile
+    //redirect = 2 means outfile
+    //redirect = 3 means outfile append
+    //redirect statements taken from kc's notes on redirection
+    if(redirect == 1)
+    {
+        close(0);
+        //open for read infile
+        open(args[i-1], O_RDONLY);
+    }
+    else if(redirect == 2)
+    {
+        close(1);
+        //open for write outfile
+        open(args[i-1], O_WRONLY | O_CREAT, 0644);
+    }
+    else if(redirect == 3)
+    {
+        close(1);
+        //open for append outfile
+        open(args[i-1], O_WRONLY | O_APPEND);
+    }
+    printf("cmd = %s args[1] = %s\n", cmd, args[1]);
+    //iterate through bin folders for command to use execve
+    //output based on kc's example
+   
+    strcpy(old, args[0]);
+    i = 0;
+    while(path[i] != NULL)
+    {
+        strcpy(new, path[i]);
+        strcat(new, "/");
+        strcat(new, old);
+        if(redirect == 0)
+            printf("commandPath[%d] = %s\n", i, new);//if there's redirect we can't print or it will write to the file
+        execve(new, args, envp);
+        //iterate to next value
+        i++;
+    }
+    
+    return 0;
+}
+
+//the other function handles only single commands, this handles pipes (with up to two arguments). inspired by kc's example
+void doPipe(char head[512], char tail[512], char* envp)
+{
+    int pid, pd[2], status;
+    
+    printf("Head = %s Tail = %s\n", head, tail);
+    
+    //create the pipe
+    pipe(pd);
+    pid = fork();
+    
+    //fork child to share the pipe
+    if(pid)
+    {
+        //parent as pipe writer
+        close(pd[0]);//writer must close pd[0]
+        close(1);//close 1 before replacing it
+        dup(pd[1]);//replace 1 with pd[1]
+        pid = wait(&status);//wait for child to die
+        doCommand(tail, envp);//execute the command
+    }
+    else
+    {
+        //child as pipe reader
+        close(pd[1]);//reader mus close pd[1]
+        close(0);//close 0 before replacing it
+        dup(pd[0]);//replace 0 with pd[0]
+        //call doCommand to do the rest
+        doCommand(head, envp);//execute the command
+    }
+}

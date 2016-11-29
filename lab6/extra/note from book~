@@ -1,0 +1,24 @@
+compute group# and offset# in that group
+group = (ino - 1) / inodes_per_group;
+inumber = (ino - 1) % inodes_per_group;
+
+find group's group descriptor
+gdblk = group / desc_per_block;
+gdisp = group % desc_per_block;
+
+computer inode's block# and offset in that group
+blk = inumber / inodes_per_block;
+disp = inumber % inodes_per_block;// inode offset
+
+read group descripter to get group's inode table start block#
+getblk(1 + first_data_block + gdblk, buf, 1);// GD begin block
+gp = (GD *)buf + gdisp;
+blk += gp->bg_inode_table;
+getblk(blk, buf, 1);
+INODE *ip = (INODE *)buf + (disp * iratio);//iratio = 2 if inode_size = 256
+
+
+
+home inode = 1212417
+2
+1212425

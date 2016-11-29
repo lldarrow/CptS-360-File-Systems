@@ -1,0 +1,2 @@
+cmd = echo args[1] = "abababa"
+"abababa"

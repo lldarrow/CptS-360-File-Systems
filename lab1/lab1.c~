@@ -1,0 +1,128 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+
+typedef unsigned int u32;
+char *table = "0123456789ABCDEF";
+
+void prints(char *s)
+{
+    int i;
+    //writes each character until null character in string is reached
+    for (i = 0;s[i] != '\0'; i++)
+    {
+        putchar(s[i]);
+    }
+}
+
+int rpu(u32 x, int base)
+{
+    char c;
+    if (x){
+        c = table[x % base];
+        rpu(x / base, base);
+        putchar(c);
+    }
+    return 1;
+}
+
+//prints an unsigned int (u32)x, as written in the lab
+int printu(u32 x, int base)
+{
+    if (x == 0)
+        putchar('0');
+    else
+        rpu(x, base);
+    putchar(' ');
+}
+
+//prints an integer (which may be negative)
+int printd(int x)
+{
+    //if x is negative print the sign and convert to unsigned
+    if(x < 0)
+    {
+        prints("-");
+        x = x * -1;
+    }
+    printu(x, 10);
+    return 0;
+}
+
+//print x in octal as 0.....
+int printo(u32 x)
+{
+    prints("0");
+    printu(x, 8);
+    return 0;
+}
+
+//print x in hex. as 0x....
+int printx(u32 x)
+{
+    prints("0x");
+    printu(x, 16);
+    return 0;
+}
+
+void myprintf(char *fmt, ...)
+{
+    va_list argptr;
+    int i = 0;
+    char *cp;
+
+    va_start(argptr, fmt);
+
+    for(cp = fmt; *cp != '/0'; cp++)
+    {
+        if(*cp != '%')
+        {
+            putchar(*cp);
+            continue;
+        }
+        switch(*++cp)
+        {
+            case 'c':
+                    i = va_arg(argptr, int);
+                    putchar(i);
+                    break;
+            case 's':
+                    i = va_arg(argptr, int);
+                    prints(i);
+                    break;
+            case 'u':
+                    i = va_arg(argptr, int);
+                    printu(i, 10);
+                    break;
+            case 'd':
+                    i = va_arg(argptr, int);
+                    printd(i);
+                    break;
+            case 'o':
+                    i = va_arg(argptr, int);
+                    printo(i);
+                    break;
+            case 'x':
+                    i = va_arg(argptr, int);
+                    printx(i);
+                    break;
+            case '%':
+                    putchar('%');
+                    break;
+        }
+    }
+    va_end(argptr);
+}
+
+int main()
+{
+    //prints("hello\n");
+    printd(24);
+    prints("\n");
+    printo(24);
+    prints("\n");
+    printx(24);
+    return 0;
+}
+
+
